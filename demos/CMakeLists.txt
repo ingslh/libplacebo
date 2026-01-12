@@ -1,13 +1,49 @@
 # demos/CMakeLists.txt
 
-find_package(PkgConfig QUIET)
-
 # Dependencies
-pkg_check_modules(GLFW3 glfw3)
-pkg_check_modules(SDL2 sdl2)
-pkg_check_modules(SDL2_IMAGE SDL2_image)
 
-pkg_check_modules(FFMPEG libavcodec libavformat libavutil)
+# GLFW3
+find_package(glfw3 CONFIG)
+if(NOT glfw3_FOUND)
+    find_path(GLFW3_INCLUDE_DIRS GLFW/glfw3.h)
+    find_library(GLFW3_LIBRARIES glfw3 glfw)
+    if(GLFW3_INCLUDE_DIRS AND GLFW3_LIBRARIES)
+        set(GLFW3_FOUND TRUE)
+    endif()
+endif()
+
+# SDL2
+find_package(SDL2 CONFIG)
+if(NOT SDL2_FOUND)
+    find_path(SDL2_INCLUDE_DIRS SDL.h PATH_SUFFIXES SDL2)
+    find_library(SDL2_LIBRARIES SDL2)
+    if(SDL2_INCLUDE_DIRS AND SDL2_LIBRARIES)
+        set(SDL2_FOUND TRUE)
+    endif()
+endif()
+
+# SDL2_image
+# Simplified check
+find_path(SDL2_IMAGE_INCLUDE_DIRS SDL_image.h PATH_SUFFIXES SDL2)
+find_library(SDL2_IMAGE_LIBRARIES SDL2_image)
+if(SDL2_IMAGE_INCLUDE_DIRS AND SDL2_IMAGE_LIBRARIES)
+    set(SDL2_IMAGE_FOUND TRUE)
+endif()
+
+# FFMPEG
+find_path(AVCODEC_INCLUDE_DIR libavcodec/avcodec.h)
+find_library(AVCODEC_LIBRARY avcodec)
+find_path(AVFORMAT_INCLUDE_DIR libavformat/avformat.h)
+find_library(AVFORMAT_LIBRARY avformat)
+find_path(AVUTIL_INCLUDE_DIR libavutil/avutil.h)
+find_library(AVUTIL_LIBRARY avutil)
+
+if(AVCODEC_INCLUDE_DIR AND AVCODEC_LIBRARY AND AVFORMAT_LIBRARY AND AVUTIL_LIBRARY)
+    set(FFMPEG_FOUND TRUE)
+    set(FFMPEG_INCLUDE_DIRS ${AVCODEC_INCLUDE_DIR} ${AVFORMAT_INCLUDE_DIR} ${AVUTIL_INCLUDE_DIR})
+    set(FFMPEG_LIBRARIES ${AVCODEC_LIBRARY} ${AVFORMAT_LIBRARY} ${AVUTIL_LIBRARY})
+endif()
+
 
 # Configuration Data
 set(HAVE_NUKLEAR 0)
@@ -34,9 +70,17 @@ else()
 endif()
 
 # Check EGL
-# find_path(EGL_INCLUDE_DIR EGL/egl.h) ... simplifying
-if(PL_USE_OPENGL) # Approximation logic
+find_path(EGL_INCLUDE_DIR EGL/egl.h)
+if(PL_USE_OPENGL AND EGL_INCLUDE_DIR)
     list(APPEND DEMO_DEFS "HAVE_EGL=1")
+    include_directories(${EGL_INCLUDE_DIR})
+endif()
+
+# Vulkan headers
+if(PL_USE_VULKAN)
+    if(EXISTS "${CMAKE_SOURCE_DIR}/3rdparty/Vulkan-Headers/include")
+        include_directories("${CMAKE_SOURCE_DIR}/3rdparty/Vulkan-Headers/include")
+    endif()
 endif()
 
 # Objects for window backends to handle distinct compile flags
@@ -195,7 +239,7 @@ endif()
 # Headless check (simple approx)
 if(PL_USE_VULKAN)
     add_executable(video-filtering video-filtering.c)
-    target_link_libraries(video-filtering PRIVATE placebo demo_common) # Need demo_common or config_demos.h includes
+    target_link_libraries(video-filtering PRIVATE demo_common) # Need demo_common or config_demos.h includes
     target_include_directories(video-filtering PRIVATE 
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_BINARY_DIR}
@@ -204,7 +248,7 @@ if(PL_USE_VULKAN)
     install(TARGETS video-filtering RUNTIME DESTINATION bin)
     
     add_executable(multigpu-bench multigpu-bench.c)
-    target_link_libraries(multigpu-bench PRIVATE placebo demo_common) # Need demo_common or config_demos.h includes
+    target_link_libraries(multigpu-bench PRIVATE demo_common) # Need demo_common or config_demos.h includes
     target_include_directories(multigpu-bench PRIVATE 
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_BINARY_DIR}
