@@ -452,7 +452,7 @@ static bool render_frame(struct plplay *p, const struct pl_swapchain_frame *fram
     }
 
     pl_clock_t ts_pre = pl_clock_now();
-    if (!pl_render_image_mix(p->renderer, mix, &target, &opts->params))
+    if (!pl_render_image(p->renderer, mix->frames[0], &target, &opts->params))
         return false;
     pl_clock_t ts_rendered = pl_clock_now();
     if (!ui_draw(p->ui, frame))
