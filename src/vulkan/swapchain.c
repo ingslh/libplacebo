@@ -159,13 +159,20 @@ static bool map_color_space(VkColorSpaceKHR space, struct pl_color_space *out)
     }
 }
 
+static inline int quant_score(int depth, int requested)
+{
+    pl_assert(depth >= 0 && depth <= 16);
+    pl_assert(requested >= 0 && requested <= 16);
+    return requested <= depth ? 0 : 17 * (16 - depth) + requested - depth;
+}
+
 static bool pick_surf_format(pl_swapchain sw, const struct pl_color_space *hint)
 {
     struct priv *p = PL_PRIV(sw);
     struct vk_ctx *vk = p->vk;
     pl_gpu gpu = sw->gpu;
 
-    int best_score = 0, best_id;
+    int best_score = -1000, best_id;
     bool wide_gamut = pl_color_primaries_is_wide_gamut(hint->primaries);
     bool prefer_hdr = pl_color_transfer_is_hdr(hint->transfer);
 
@@ -227,6 +234,12 @@ static bool pick_surf_format(pl_swapchain sw, const struct pl_color_space *hint)
                 default: // skip any other format
                     continue;
             }
+            int alpha_depth = plfmt->num_components < 4 ? 0 : PL_MIN(plfmt->component_depth[3], 16);
+            int err = quant_score(plfmt->component_depth[0], PL_MIN(p->params.color_bits, 16)) +
+                      quant_score(alpha_depth, PL_MIN(p->params.alpha_bits, 16));
+            // Reset score if we don't meet the requested bit depth
+            if (err)
+                score = -err;
 #ifdef __APPLE__
             // On Apple hardware, only these formats allow direct-to-display
             // rendering, so give them a slight score boost to tie-break against
@@ -274,7 +287,7 @@ static bool pick_surf_format(pl_swapchain sw, const struct pl_color_space *hint)
         }
     }
 
-    if (!best_score) {
+    if (best_score == -1000) {
         PL_ERR(vk, "Failed picking any valid, renderable surface format!");
         return false;
     }
@@ -444,6 +457,9 @@ static bool swapchain_destroy(pl_swapchain sw, struct vk_swapchain **ptr,
     struct priv *p = PL_PRIV(sw);
     struct vk_ctx *vk = p->vk;
     struct vk_swapchain *vk_sw = *ptr;
+
+    if (!vk_sw)
+        return true;
 
     if (vk_sw->fences_out.num > 0) {
         VkResult res = vk->WaitForFences(vk->dev, vk_sw->fences_out.num,
@@ -718,7 +734,17 @@ static bool vk_sw_recreate(pl_swapchain sw, int w, int h)
     p->cur_width = sinfo.imageExtent.width;
     p->cur_height = sinfo.imageExtent.height;
 
-    if (p->has_swapchain_maintenance1)
+    bool use_deferred_alloc = p->has_swapchain_maintenance1;
+#ifdef _WIN32
+    // NVIDIA's Windows drivers have a bug where using deferred memory allocation
+    // causes crashes in the driver. It's unclear why exactly it happens, seems
+    // to be driver internal thread, calling into d3d12core.dll. Might be some
+    // overlay or who knows, disable it for now.
+    // See for more info <https://github.com/mpv-player/mpv/issues/17318>.
+    if (vk->props.vendorID == VK_VENDOR_ID_NVIDIA)
+        use_deferred_alloc = false;
+#endif
+    if (use_deferred_alloc)
         sinfo.flags |= VK_SWAPCHAIN_CREATE_DEFERRED_MEMORY_ALLOCATION_BIT_KHR;
 
     PL_DEBUG(sw, "(Re)creating swapchain of size %dx%d",
